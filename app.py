@@ -31,28 +31,36 @@ uploaded_files = st.file_uploader(
     type=["jpg", "jpeg", "png"], 
     accept_multiple_files=True
 )
-
 def extract_bill_details(image):
-    """Uses Gemini to extract billing month and total amount from the image."""
+    """Uses Gemini to extract billing month and total amount with improved fallback logic."""
     prompt = """
-    Analyze this electricity bill image. Extract the billing month (or billing period) and the total amount due/payable.
-    Respond ONLY with a valid JSON object matching this structure. Do not include markdown formatting like ```json.
-    If you cannot confidently find a value, use null.
+    Analyze this electricity bill image. Identify the billing month/period and the final total amount due.
     
+    Respond ONLY with a valid JSON object matching this structure:
     {
-        "billing_month": "Month Year (e.g., January 2026)",
-        "amount_due": 1250.50
+        "billing_month": "Month Year",
+        "amount_due": 1234.56
     }
+    
+    Rules:
+    - If the month isn't explicitly clear, look for the 'Bill Date' or 'Due Date' and use that month.
+    - The amount_due must be a raw number (no currency symbols, no commas).
+    - Do not include markdown formatting like ```json.
     """
     try:
         response = model.generate_content([prompt, image])
-        # Clean response string just in case it returns markdown blocks
-        clean_text = re.sub(r"```json\s*|\s*```", "", response.text.strip())
+        raw_text = response.text.strip()
+        
+        # Clean any accidental markdown code blocks
+        clean_text = re.sub(r"```json\s*|\s*```", "", raw_text)
+        
         data = json.loads(clean_text)
         return data
     except Exception as e:
+        # This will print the actual error and raw text to your Streamlit app interface for debugging
+        st.error(f"Failed to parse data for a file. Raw AI Response was: {response.text if 'response' in locals() else 'No response'}")
         return {"billing_month": None, "amount_due": None, "error": str(e)}
-
+        
 # 3. Processing the Bills
 if uploaded_files:
     if st.button("Analyze Uploaded Bills", type="primary"):
