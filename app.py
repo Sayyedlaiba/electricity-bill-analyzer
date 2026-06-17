@@ -26,11 +26,13 @@ genai.configure(api_key=api_key)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 # 2. File Uploader
-uploaded_files = st.file_uploader(
-    "Upload Bill Images (JPEG/PNG) - You can select multiple files", 
-    type=["jpg", "jpeg", "png"], 
-    accept_multiple_files=True
-)
+# Change this inside your loop:
+for index, file in enumerate(uploaded_files):
+    status_text.text(f"Processing image {index + 1} of {len(uploaded_files)}: {file.name}...")
+    
+    # OLD LINE: image = Image.open(file) -> Remove this
+    # NEW LINE: Pass the 'file' directly to the updated function
+    extracted = extract_bill_details(file)
 def extract_bill_details(uploaded_file):
     """Uses Gemini to extract details using native byte arrays for stability."""
     prompt = """
