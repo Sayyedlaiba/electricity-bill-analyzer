@@ -25,73 +25,32 @@ genai.configure(api_key=api_key)
 # Using gemini-2.5-flash as it is fast, multimodal, and ideal for structured data extraction
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# 2. File Uploader
-# Change this inside your loop:
-for index, file in enumerate(uploaded_files):
-    status_text.text(f"Processing image {index + 1} of {len(uploaded_files)}: {file.name}...")
-    
-    # OLD LINE: image = Image.open(file) -> Remove this
-    # NEW LINE: Pass the 'file' directly to the updated function
-    extracted = extract_bill_details(file)
-def extract_bill_details(uploaded_file):
-    """Uses Gemini to extract details using native byte arrays for stability."""
-    prompt = """
-    Analyze this electricity bill image. Identify the billing month/period and the final total amount due.
-    
-    Respond ONLY with a valid JSON object matching this structure:
-    {
-        "billing_month": "Month Year",
-        "amount_due": 1234.56
-    }
-    
-    Rules:
-    - If the month isn't explicitly clear, look for the 'Bill Date' or 'Due Date' and use that month.
-    - The amount_due must be a raw number (no currency symbols, no commas).
-    - Do not include markdown formatting like ```json.
-    """
-    try:
-        # Read file as raw bytes natively for the API
-        image_bytes = uploaded_file.getvalue()
-        image_parts = [
-            {
-                "mime_type": uploaded_file.type,
-                "data": image_bytes
-            }
-        ]
-        
-        # Pass the formatted byte structure to the model
-        response = model.generate_content([prompt, image_parts[0]])
-        
-        if not response or not response.text:
-            return {"billing_month": None, "amount_due": None, "error": "Empty response from Gemini API"}
-            
-        raw_text = response.text.strip()
-        
-        # Clean any accidental markdown code blocks
-        clean_text = re.sub(r"```json\s*|\s*```", "", raw_text)
-        
-        data = json.loads(clean_text)
-        return data
-        
-    except Exception as e:
-        # Detailed UI fallback error
-        st.error(f"⚠️ API Error on file {uploaded_file.name}: {str(e)}")
-        return {"billing_month": None, "amount_due": None, "error": str(e)}
-        
-# 3. Processing the Bills
-if uploaded_files:
+# =====================================================================
+# 2. FILE UPLOADER (Make sure this variable name matches exactly!)
+# =====================================================================
+uploaded_files = st.file_uploader(
+    "Upload Bill Images (JPEG/PNG) - You can select multiple files", 
+    type=["jpg", "jpeg", "png"], 
+    accept_multiple_files=True
+)
+
+# =====================================================================
+# 3. PROCESSING THE BILLS (This is where your loop lives)
+# =====================================================================
+if uploaded_files:  # <--- Checks if the user actually uploaded anything
     if st.button("Analyze Uploaded Bills", type="primary"):
         bill_data = []
         
-        # Progress bar for visual feedback
+        # Progress UI setup
         progress_bar = st.progress(0)
         status_text = st.empty()
         
+        # This is line 30 where your error happened:
         for index, file in enumerate(uploaded_files):
             status_text.text(f"Processing image {index + 1} of {len(uploaded_files)}: {file.name}...")
             
-            image = Image.open(file)
-            extracted = extract_bill_details(image)
+            # Send the file data straight to your extraction function
+            extracted = extract_bill_details(file) 
             
             if extracted.get("billing_month") and extracted.get("amount_due"):
                 bill_data.append({
@@ -109,12 +68,9 @@ if uploaded_files:
         
         if bill_data:
             df = pd.DataFrame(bill_data)
-            
-            # Save to session state so it doesn't disappear on rerun
             st.session_state['bill_df'] = df
         else:
             st.error("No valid data could be extracted from the uploaded images.")
-
 # 4. Data Visualization and Insights
 if 'bill_df' in st.session_state:
     df = st.session_state['bill_df']
