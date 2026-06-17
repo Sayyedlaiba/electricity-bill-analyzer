@@ -31,8 +31,8 @@ uploaded_files = st.file_uploader(
     type=["jpg", "jpeg", "png"], 
     accept_multiple_files=True
 )
-def extract_bill_details(image):
-    """Uses Gemini to extract billing month and total amount with improved fallback logic."""
+def extract_bill_details(uploaded_file):
+    """Uses Gemini to extract details using native byte arrays for stability."""
     prompt = """
     Analyze this electricity bill image. Identify the billing month/period and the final total amount due.
     
@@ -48,7 +48,21 @@ def extract_bill_details(image):
     - Do not include markdown formatting like ```json.
     """
     try:
-        response = model.generate_content([prompt, image])
+        # Read file as raw bytes natively for the API
+        image_bytes = uploaded_file.getvalue()
+        image_parts = [
+            {
+                "mime_type": uploaded_file.type,
+                "data": image_bytes
+            }
+        ]
+        
+        # Pass the formatted byte structure to the model
+        response = model.generate_content([prompt, image_parts[0]])
+        
+        if not response or not response.text:
+            return {"billing_month": None, "amount_due": None, "error": "Empty response from Gemini API"}
+            
         raw_text = response.text.strip()
         
         # Clean any accidental markdown code blocks
@@ -56,9 +70,10 @@ def extract_bill_details(image):
         
         data = json.loads(clean_text)
         return data
+        
     except Exception as e:
-        # This will print the actual error and raw text to your Streamlit app interface for debugging
-        st.error(f"Failed to parse data for a file. Raw AI Response was: {response.text if 'response' in locals() else 'No response'}")
+        # Detailed UI fallback error
+        st.error(f"⚠️ API Error on file {uploaded_file.name}: {str(e)}")
         return {"billing_month": None, "amount_due": None, "error": str(e)}
         
 # 3. Processing the Bills
