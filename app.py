@@ -133,5 +133,14 @@ if 'bill_df' in st.session_state:
     
     # UI Layout: Chart on left, Raw data on right
     col1, col2 = st.columns([2, 1])
-    
     with col1:
+        st.subheader("📊 Consumption Trend Over Time")
+        fig = px.bar(df, x="Billing Month", y="Amount Due", text="Amount Due",
+                     labels={"Amount Due": "Amount Due"},
+                     color="Amount Due", color_continuous_scale="RdYlGn_r")
+        fig.update_traces(textposition='outside')
+        st.plotly_chart(fig, use_container_width=True)
+        
+    with col2:
+        st.subheader("📋 Extracted Data")
+        st.dataframe(df[["Billing Month", "Amount Due"]], use_container_width=True, hide_index=True)
