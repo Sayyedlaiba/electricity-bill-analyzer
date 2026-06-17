@@ -2,18 +2,67 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import google.generativeai as genai
-from PIL import Image
 import json
 import re
 
-# Page Configuration
+# =====================================================================
+# 1. CORE FUNCTIONS (Must be defined first)
+# =====================================================================
+def extract_bill_details(uploaded_file):
+    """Uses Gemini to extract details using native byte arrays for stability."""
+    prompt = """
+    Analyze this electricity bill image. Identify the billing month/period and the final total amount due.
+    
+    Respond ONLY with a valid JSON object matching this structure:
+    {
+        "billing_month": "Month Year",
+        "amount_due": 1234.56
+    }
+    
+    Rules:
+    - If the month isn't explicitly clear, look for the 'Bill Date' or 'Due Date' and use that month.
+    - The amount_due must be a raw number (no currency symbols, no commas).
+    - Do not include markdown formatting like ```json.
+    """
+    try:
+        # Read file as raw bytes natively for the API
+        image_bytes = uploaded_file.getvalue()
+        image_parts = [
+            {
+                "mime_type": uploaded_file.type,
+                "data": image_bytes
+            }
+        ]
+        
+        # Pass the formatted byte structure to the model
+        response = model.generate_content([prompt, image_parts[0]])
+        
+        if not response or not response.text:
+            return {"billing_month": None, "amount_due": None, "error": "Empty response from Gemini API"}
+            
+        raw_text = response.text.strip()
+        
+        # Clean any accidental markdown code blocks
+        clean_text = re.sub(r"```json\s*|\s*```", "", raw_text)
+        
+        data = json.loads(clean_text)
+        return data
+        
+    except Exception as e:
+        # Detailed UI fallback error printed to the screen
+        st.error(f"⚠️ API Error on file {uploaded_file.name}: {str(e)}")
+        return {"billing_month": None, "amount_due": None, "error": str(e)}
+
+
+# =====================================================================
+# 2. PAGE INITIALIZATION & CONFIGURATION
+# =====================================================================
 st.set_page_config(page_title="Annual Electricity Bill Analyzer", page_icon="⚡", layout="wide")
 
 st.title("⚡ Annual Electricity Bill Analyzer")
 st.write("Upload your electricity bills for the past year to analyze your consumption trends, peaks, and lows.")
 
-# 1. Setup API Key Securely
-# In Streamlit Cloud, you set this up in Settings -> Secrets as GEMINI_API_KEY
+# Sidebar API Key Setup
 api_key = st.sidebar.text_input("Enter Gemini API Key:", type="password", value=st.secrets.get("GEMINI_API_KEY", ""))
 
 if not api_key:
@@ -22,11 +71,11 @@ if not api_key:
 
 # Initialize Gemini Client
 genai.configure(api_key=api_key)
-# Using gemini-2.5-flash as it is fast, multimodal, and ideal for structured data extraction
 model = genai.GenerativeModel('gemini-2.5-flash')
 
+
 # =====================================================================
-# 2. FILE UPLOADER (Make sure this variable name matches exactly!)
+# 3. USER INTERFACE: FILE UPLOADER
 # =====================================================================
 uploaded_files = st.file_uploader(
     "Upload Bill Images (JPEG/PNG) - You can select multiple files", 
@@ -34,10 +83,11 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
+
 # =====================================================================
-# 3. PROCESSING THE BILLS (This is where your loop lives)
+# 4. PROCESSING LOGIC
 # =====================================================================
-if uploaded_files:  # <--- Checks if the user actually uploaded anything
+if uploaded_files:
     if st.button("Analyze Uploaded Bills", type="primary"):
         bill_data = []
         
@@ -45,11 +95,10 @@ if uploaded_files:  # <--- Checks if the user actually uploaded anything
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        # This is line 30 where your error happened:
         for index, file in enumerate(uploaded_files):
             status_text.text(f"Processing image {index + 1} of {len(uploaded_files)}: {file.name}...")
             
-            # Send the file data straight to your extraction function
+            # Send file structure directly to the core function
             extracted = extract_bill_details(file) 
             
             if extracted.get("billing_month") and extracted.get("amount_due"):
@@ -68,70 +117,21 @@ if uploaded_files:  # <--- Checks if the user actually uploaded anything
         
         if bill_data:
             df = pd.DataFrame(bill_data)
+            # Save to session state so it doesn't disappear on user interactions
             st.session_state['bill_df'] = df
         else:
             st.error("No valid data could be extracted from the uploaded images.")
-# 4. Data Visualization and Insights
+
+
+# =====================================================================
+# 5. DATA VISUALIZATION AND INSIGHTS GENERATION
+# =====================================================================
 if 'bill_df' in st.session_state:
     df = st.session_state['bill_df']
     
     st.success("Analysis Complete!")
     
-    # Layout splits: Insights on left, Data table on right
+    # UI Layout: Chart on left, Raw data on right
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.subheader("📊 Consumption Trend Over Time")
-        # Creating a bar chart for clear comparison
-        fig = px.bar(df, x="Billing Month", y="Amount Due", text="Amount Due",
-                     labels={"Amount Due": "Amount (₹/$)"},
-                     color="Amount Due", color_continuous_scale="RdYlGn_r")
-        fig.update_traces(textposition='outside')
-        st.plotly_chart(fig, use_container_width=True)
-        
-    with col2:
-        st.subheader("📋 Extracted Data")
-        st.dataframe(df[["Billing Month", "Amount Due"]], use_container_width=True, hide_index=True)
-
-    # Key Performance Metrics / Anomalies
-    st.markdown("---")
-    st.subheader("💡 Key Insights")
-    
-    max_bill = df.loc[df['Amount Due'].idxmax()]
-    min_bill = df.loc[df['Amount Due'].idxmin()]
-    avg_bill = df['Amount Due'].mean()
-    
-    metric_col1, metric_col2, metric_col3 = st.columns(3)
-    
-    with metric_col1:
-        st.metric(
-            label="🔴 Highest Bill Month", 
-            value=f"{max_bill['Billing Month']}", 
-            delta=f"{max_bill['Amount Due']:.2f} (Peak)"
-        )
-        st.caption(f"Your highest expenditure happened in {max_bill['Billing Month']}.")
-        
-    with metric_col2:
-        st.metric(
-            label="🟢 Lowest Bill Month", 
-            value=f"{min_bill['Billing Month']}", 
-            delta=f"{min_bill['Amount Due']:.2f} (Dip)",
-            delta_color="inverse"
-        )
-        st.caption(f"Your lowest expenditure happened in {min_bill['Billing Month']}.")
-
-    with metric_col3:
-        st.metric(
-            label="🔵 Average Monthly Bill", 
-            value=f"{avg_bill:.2f}"
-        )
-        st.caption("This is your baseline monthly power cost.")
-        
-    # Smart Explanations
-    st.markdown("### 🔍 Summary Analysis")
-    st.write(
-        f"Your power bills peaked significantly during **{max_bill['Billing Month']}**, "
-        f"costing you **{max_bill['Amount Due']:.2f}**, which is "
-        f"**{(max_bill['Amount Due'] - avg_bill):.2f} higher** than your yearly average. "
-        f"Conversely, you managed your consumption best during **{min_bill['Billing Month']}**."
-    )
